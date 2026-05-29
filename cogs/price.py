@@ -1,0 +1,171 @@
+from discord.ext import commands, tasks
+import discord
+import db
+import yfinance as yf
+import asyncio
+
+# Yahoo finance requirement (does not show up for WebSocket otherwise)
+symbol_list = [sym + "-USD" for sym in db.get_crypto_sym()]
+
+# >>> dat.live()
+# Connected to WebSocket.
+# Subscribed to symbols: ['BTC-USD']
+# Listening for messages...
+# {'id': 'BTC-USD', 'price': 80950.95, 'time': '1778419338000', 'currency': 'USD', 'exchange': 'CCC', 'quote_type': 41, 
+#'market_hours': 1, 'change_percent': 0.6958814, 'day_volume': '16655864832', 'day_high': 80922.92, 'day_low': 80558.07, 
+#'change': 559.4297, 'open_price': 80655.64, 'last_size': '16655864832', 'price_hint': '2', 'vol_24hr': '16655864832', 
+#'vol_all_currencies': '16655864832', 'from_currency': 'BTC', 'circulating_supply': 20027400.0, 'market_cap': 1620675790000.0}
+
+class Price(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+        self.stream_prices.start()
+    
+    @tasks.loop(count=1)
+    async def stream_prices(self):
+        async with yf.AsyncWebSocket() as ws:
+            await ws.subscribe(symbol_list)
+            await ws.listen(self.on_price_update)
+
+    def on_price_update(self, message):
+        lp_id = db.get_id_from_sym(message["id"][:-4])
+        if db.get_price_from_id(lp_id) != message["price"]:
+            db.update_live_price(lp_id, message["price"], message.get("change", 0), float(message.get("vol_24hr", 0)))
+
+    @commands.command(name='price', description="Gives the current price of a cryptocurrency based on its symbol")
+    async def price(self, ctx, symbol: str):
+        #assert symbol + "-USD" not in symbol_list
+        if (symbol + "-USD" not in symbol_list):
+            info = await asyncio.to_thread(lambda: yf.Ticker(symbol + "-USD").info)
+            print(info)
+
+            if info:
+                db.update_crypto_list(symbol, info["name"])
+                symbol_list.append(symbol + "-USD")
+                lp_id = db.get_id_from_sym(symbol)
+                db.update_live_price(lp_id, info["open"], 0.0, info["volume"])
+            else:
+                await ctx.send("Symbol not found")
+                return
+        lp_id = db.get_id_from_sym(symbol)
+        lp = db.get_table_data("live_prices", lp_id)
+        to_send = f"SYMBOL: {symbol}, PRICE: {lp[1]}, CHANGE: {lp[2]}, VOLUME: {lp[3]}, LAST UPDATED: {lp[4]}"
+        await ctx.send(to_send)        
+
+
+    # {'Open': 
+    #     {Timestamp('2026-05-07 00:00:00+0000', tz='UTC'): 81428.8515625, Timestamp('2026-05-08 00:00:00+0000', tz='UTC'): 80009.625, 
+    #     Timestamp('2026-05-09 00:00:00+0000', tz='UTC'): 80187.7421875, Timestamp('2026-05-10 00:00:00+0000', tz='UTC'): 80655.640625}, 
+    # 'High': 
+    #     {Timestamp('2026-05-07 00:00:00+0000', tz='UTC'): 81684.953125, Timestamp('2026-05-08 00:00:00+0000', tz='UTC'): 80447.265625, 
+    #     Timestamp('2026-05-09 00:00:00+0000', tz='UTC'): 81030.0625, Timestamp('2026-05-10 00:00:00+0000', tz='UTC'): 81482.5390625}, 
+    # 'Low': 
+    #     {Timestamp('2026-05-07 00:00:00+0000', tz='UTC'): 79522.65625, Timestamp('2026-05-08 00:00:00+0000', tz='UTC'): 79205.515625, 
+    #     Timestamp('2026-05-09 00:00:00+0000', tz='UTC'): 80119.9296875, Timestamp('2026-05-10 00:00:00+0000', tz='UTC'): 80558.0703125}, 
+    # 'Close': 
+    #     {Timestamp('2026-05-07 00:00:00+0000', tz='UTC'): 80009.9921875, Timestamp('2026-05-08 00:00:00+0000', tz='UTC'): 80186.765625, 
+    #     Timestamp('2026-05-09 00:00:00+0000', tz='UTC'): 80664.3671875, Timestamp('2026-05-10 00:00:00+0000', tz='UTC'): 81251.9921875}, 
+    # 'Volume':
+    #     {Timestamp('2026-05-07 00:00:00+0000', tz='UTC'): 36931193154, Timestamp('2026-05-08 00:00:00+0000', tz='UTC'): 33789351540, 
+    #     Timestamp('2026-05-09 00:00:00+0000', tz='UTC'): 18102086996, Timestamp('2026-05-10 00:00:00+0000', tz='UTC'): 18724552704}, 
+    # 'Dividends': 
+    #     {Timestamp('2026-05-07 00:00:00+0000', tz='UTC'): 0.0, Timestamp('2026-05-08 00:00:00+0000', tz='UTC'): 0.0, 
+    #     Timestamp('2026-05-09 00:00:00+0000', tz='UTC'): 0.0, Timestamp('2026-05-10 00:00:00+0000', tz='UTC'): 0.0}, 
+    # 'Stock Splits':
+    #     {Timestamp('2026-05-07 00:00:00+0000', tz='UTC'): 0.0, Timestamp('2026-05-08 00:00:00+0000', tz='UTC'): 0.0, 
+    #     Timestamp('2026-05-09 00:00:00+0000', tz='UTC'): 0.0, Timestamp('2026-05-10 00:00:00+0000', tz='UTC'): 0.0}}
+    async def add_to_history(self, symbol, days):
+        ticker = yf.Ticker(symbol.upper() + "-USD")
+
+        f_his = await asyncio.to_thread(lambda: ticker.history(period=str(days) + 'd'))
+        print(f_his)
+        f_his_dict = f_his.to_dict()
+        
+        cry_id = db.get_id_from_sym(symbol)
+        print(cry_id)
+
+        prices = [[] for _ in range(5)]
+        for key in f_his_dict["Open"].keys():
+            prices[0].append(key.strftime('%Y-%m-%d'))
+        
+        for value in f_his_dict["Open"].values():
+            prices[1].append(value)
+        
+        for value in f_his_dict["High"].values():
+            prices[2].append(value)
+        
+        for value in f_his_dict["Low"].values():
+            prices[3].append(value)
+        
+        for value in f_his_dict["Volume"].values():
+            prices[4].append(value)
+
+        
+
+        for i in range(len(prices[0])):
+            db.update_price_history(cry_id, prices[0][i], prices[1][i], prices[2][i],
+                                prices[3][i], prices[1][i], prices[4][i])
+    
+
+    @commands.command(name='history', description=
+            """
+                Gives the price history for a set amount of days for a cryptocurrency based on its symbol. 
+                For e.g. ?history SHIB 42
+            """
+        )
+    async def history(self, ctx, symbol, days: int):
+        days += 1
+        # his = db.get_table_data("price_history", db.get_id_from_sym(symbol))
+        his = db.get_price_history(db.get_id_from_sym(symbol), days)
+        if his == [] or len(his) != days-1:
+            await self.add_to_history(symbol, days)
+            his = db.get_price_history(db.get_id_from_sym(symbol), days)
+        
+        to_send = "```"
+        print(len(his))
+        print(days)
+        for i in range(len(his)):
+            to_send += f"Date: {his[i][2]} Open Price: {his[i][3]} High Price: {his[i][4]} Low Price: {his[i][5]} Volume: {his[i][7]}\n"
+        to_send += '```'
+        await ctx.send(to_send)
+    
+    @commands.command(name='compare', 
+                description="Compares two cryptocurrencies together for a certain amount of days. For e.g. `?compare BTC ETH 5 ")
+    async def compare(self, ctx, sym_1, sym_2, days: int):
+        days += 1
+        first_his = db.get_price_history(db.get_id_from_sym(sym_1), days)
+        if first_his == []:
+            await self.add_to_history(sym_1, days)
+            first_his = db.get_price_history(db.get_id_from_sym(sym_1), days)
+
+        second_his = db.get_price_history(db.get_id_from_sym(sym_2), days)
+        if second_his == []:
+            await self.add_to_history(sym_2, days)
+            second_his = db.get_price_history(db.get_id_from_sym(sym_2), days)
+        
+        join_prod = db.join_compare(db.get_id_from_sym(sym_1), db.get_id_from_sym(sym_2), days)
+        prod_values = [[], [], []]
+        for i in range(len(join_prod)):
+            prod_values[0].append(join_prod[i][0])
+            prod_values[1].append(join_prod[i][1])
+            prod_values[2].append(join_prod[i][2])
+
+        embed = discord.Embed(
+            title = f"Comparison: {sym_1} vs {sym_2}"
+        )
+        formatted_prod = [[], [], []]
+        formatted_prod[0] = '\n'.join([f"{val}" for val in prod_values[0]])
+        formatted_prod[1] = '\n'.join([f"{val}" for val in prod_values[1]])
+        formatted_prod[2] = '\n'.join([f"{val}" for val in prod_values[2]])
+
+
+        embed.add_field(name="Date", value=formatted_prod[0], inline="True")
+        embed.add_field(name=sym_1, value=formatted_prod[1], inline="True")
+        embed.add_field(name=sym_2, value=formatted_prod[2], inline="True")
+        await ctx.send(embed=embed)
+
+
+
+async def setup(bot):
+    await bot.add_cog(Price(bot))
