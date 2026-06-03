@@ -1,14 +1,15 @@
 import discord
 from discord.ext import commands
 import db
-import sqlite3
+import aiosqlite
 
 
 class Alerts(commands.Cog):
+    """Commands relating to creating alerts for users."""
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="alert")
+    @commands.command(name="alert", help="Creates alert for user.")
     async def alert(self, ctx, action, *args):
         action = action.lower()
 

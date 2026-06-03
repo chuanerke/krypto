@@ -1,20 +1,33 @@
-import sqlite3
+import aiosqlite
+import asyncio
 from pathlib import Path
 from datetime import datetime
 from datetime import timedelta
 
-DB_PATH = str(Path(__file__).resolve().parent / "krypto.db")
+from contextlib import asynccontextmanager
 
-def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("pragma foreign_keys = on")
-    return conn
+DB_PATH = str(Path(__file__).parent / "krypto.db")
+symbol_list = None
+
+"""
+https://docs.python.org/3/library/contextlib.html
+other way get __aexit__ error
+"""
+@asynccontextmanager
+async def get_connection():
+    conn = await aiosqlite.connect(DB_PATH)
+    await conn.execute("pragma foreign_keys = on")
+    try:
+        yield conn
+    finally:
+        await conn.commit()
+        await conn.close()
 
 
-def init_db():
-    with get_connection() as conn:
+async def init_db():
+    async with get_connection() as conn:
         try:
-            conn.executescript("""
+            await conn.executescript("""
                 create table if not exists crypto (
                     id integer primary key autoincrement,
                     symbol varchar(20) unique not null,
@@ -61,17 +74,18 @@ def init_db():
                     foreign key(crypto_id) references crypto(id) on delete cascade
                 );
             """)
-        except sqlite3.Error as err:
-            print(er.sqlite_errorcode)
-            print(er.sqlite_errorname)
+        except aiosqlite.Error as err:
+            print(err.sqlite_errorcode)
+            print(err.sqlite_errorname)
 
-    print("Database initialized")
+        print("Database initialized")
 
-def insert_crypto_list():
-    with get_connection() as conn:
-        alr_exists = conn.execute("select * from crypto").fetchone()
+async def insert_crypto_list():
+    async with get_connection() as conn:
+        alr_exists = (await(await conn.execute("select * from crypto")).fetchone())
+        print(alr_exists)
         if alr_exists is None:
-            conn.executemany(
+            await conn.executemany(
                 "insert or ignore into crypto (symbol, name) values (?, ?)",
                 [
                     ("BTC", "Bitcoin"),
@@ -99,37 +113,45 @@ def insert_crypto_list():
         else:
             print("Initial crypto list already exists")
 
-def get_crypto_sym():
-    with get_connection() as conn:
-        crypto_syms = conn.execute("select symbol from crypto").fetchall()
+async def get_crypto_sym():
+    async with get_connection() as conn:
+        crypto_syms = (await(await conn.execute("select symbol from crypto")).fetchall())
         return [sym[0] for sym in crypto_syms]
 
-def get_price_from_id(lp_id):
-    with get_connection() as conn:
-        ret_price = conn.execute("select price from live_prices where crypto_id = ?", (lp_id,)).fetchone()
+async def get_price_from_id(lp_id):
+    async with get_connection() as conn:
+        ret_price = (await conn.execute("select price from live_prices where crypto_id = ?", (lp_id,))).fetchone()
         
         return ret_price[0] if ret_price else None
 
-def update_live_price(crypto_id, price, change_24h, volume_24h):
-    with get_connection() as conn:
-        conn.execute("""
+async def update_live_price(crypto_id, price, change_24h, volume_24h):
+    async with get_connection() as conn:
+        # changed current_timestamp to 'current_timestamp', might get error, remember (Changed, ProgrammingError)
+        await conn.execute("""
             insert or replace into live_prices (crypto_id, price, change_24h, volume_24h, last_updated)
             values (?, ?, ?, ?, current_timestamp)""", 
             (crypto_id, price, change_24h, volume_24h))
 
-def get_table_data(table, lp_id):
-    with get_connection() as conn:
+async def get_table_data(table, lp_id):
+    async with get_connection() as conn:
         if table == "live_prices":
-            return conn.execute(f"select * from {table} where crypto_id = ?", (lp_id, )).fetchone()
+            stm = (await(await conn.execute(f"select * from {table} where crypto_id = ?", (lp_id, ))).fetchone())
         else:
-            return conn.execute(f"select * from {table} where crypto_id = ?", (lp_id, )).fetchall()
+            stm = (await(await conn.execute(f"select * from {table} where crypto_id = ?", (lp_id, ))).fetchall())
+        return stm
 
-def get_id_from_sym(sym: str):
-    with get_connection() as conn:
-        c_id = conn.execute("select * from crypto where symbol = ?", (sym,)).fetchone()[0]
+async def get_id_from_sym(sym: str):
+    async with get_connection() as conn:
+        # ? to '?', check (Changed, Error: Command raised an exception:
+        # ProgrammingError: Incorrect number of bindings supplied. The current statement uses 0, and there are 1 supplied.)
+        val = (await conn.execute("select * from crypto where symbol = ?", (sym,)))
+        val = (await val.fetchone())[0]
+        #val = val[0]
+
+        return val
         # to_ret = conn.execute("select * from live_prices where crypto_id = ?", (c_id,))
         # return to_ret
-        return c_id
+        #return c_id
 
 # create table if not exists price_history (
 #                     id integer primary key autoincrement,
@@ -144,14 +166,14 @@ def get_id_from_sym(sym: str):
 #                     foreign key(crypto_id) references crypto(id) on delete cascade
 #                 );
 
-def update_price_history(crypto_id, history_date, open_price, high_price, low_price, close_price, volume):
-    with get_connection() as conn:
-        conn.execute("""
+async def update_price_history(crypto_id, history_date, open_price, high_price, low_price, close_price, volume):
+    async with get_connection() as conn:
+        await conn.execute("""
         insert or replace into price_history (crypto_id, history_date, open_price, high_price, low_price, close_price, volume)
         values(?, ?, ?, ?, ?, ?, ?)""",
         (crypto_id, history_date, open_price, high_price, low_price, close_price, volume))
 
-def get_price_history(crypto_id, p_dates: int):
+async def get_price_history(crypto_id, p_dates: int):
     current_date = datetime.now()
 
     start_date = current_date - timedelta(days=p_dates)
@@ -159,11 +181,11 @@ def get_price_history(crypto_id, p_dates: int):
 
     current_date = current_date.isoformat()
 
-    with get_connection() as conn:
-        return conn.execute(f"select * from price_history where crypto_id = {crypto_id} and history_date between '{start_date}' and '{current_date}' ").fetchall()
+    async with get_connection() as conn:
+        stm = (await (await conn.execute(f"select * from price_history where crypto_id = {crypto_id} and history_date between '{start_date}' and '{current_date}' ")).fetchall())
+        return stm
 
-
-def join_compare(id_1, id_2, p_dates: int):
+async def join_compare(id_1, id_2, p_dates: int):
     current_date = datetime.now()
 
     start_date = current_date - timedelta(days=p_dates)
@@ -171,20 +193,20 @@ def join_compare(id_1, id_2, p_dates: int):
 
     current_date = current_date.isoformat()
 
-    with get_connection() as conn:
-        return conn.execute(f"""
+    async with get_connection() as conn:
+        return (await(await conn.execute(f"""
             select i1.history_date, i1.open_price, i2.open_price 
             from price_history i1 inner join price_history i2 on i1.history_date = i2.history_date where i1.crypto_id = {id_1} and i2.crypto_id = {id_2}
-            and i1.history_date between '{start_date}' and '{current_date}'""").fetchall()
+            and i1.history_date between '{start_date}' and '{current_date}'""")).fetchall())
 
 
-def update_crypto_list(crypto_symbol, crypto_name):
-    with get_connection() as conn:
-        conn.execute("insert into crypto(symbol, name) values (?, ?)", (crypto_symbol, crypto_name, ))
+async def update_crypto_list(crypto_symbol, crypto_name):
+    async with get_connection() as conn:
+        await conn.execute("insert or ignore into crypto(symbol, name) values (?, ?)", (crypto_symbol, crypto_name, ))
 
-def get_sym_from_id(crypto_id):
-    with get_connection() as conn:
-        return conn.execute("select symbol from crypto where id = ?", (crypto_id,)).fetchone()[0]
+async def get_sym_from_id(crypto_id):
+    async with get_connection() as conn:
+        return (await(await conn.execute("select symbol from crypto where id = ?", (crypto_id,))).fetchone())[0]
 
 
 
@@ -198,41 +220,46 @@ def get_sym_from_id(crypto_id):
 #     foreign key(user_id) references users(id) on delete cascade,
 #     foreign key(crypto_id) references crypto(id) on delete cascade
 # );
-def add_alert(user_id, crypto_id, direction, target_price, active):
-    with get_connection() as conn:
-        conn.execute("insert into alerts (user_id, crypto_id, direction, target_price, active) values (?,?,?,?,?)", 
+async def add_alert(user_id, crypto_id, direction, target_price, active):
+    async with get_connection() as conn:
+        await conn.execute("insert into alerts (user_id, crypto_id, direction, target_price, active) values (?,?,?,?,?)", 
                         (user_id, crypto_id, direction, target_price, active))
 
-def get_alerts(user_id):
-    with get_connection() as conn:
-        return conn.execute(f"select * from alerts where user_id = {user_id}").fetchall()
+async def get_alerts(user_id):
+    async with get_connection() as conn:
+        return (await(await conn.execute(f"select * from alerts where user_id = {user_id}")).fetchall())
 
-def remove_alert(alert_id, user_id):
-    with get_connection() as conn:
-        return conn.execute(f"delete from alerts where id = {alert_id} and user_id = {user_id}")
+async def remove_alert(alert_id, user_id):
+    async with get_connection() as conn:
+        return await conn.execute(f"delete from alerts where id = {alert_id} and user_id = {user_id}")
 
-def check_alerts(crypto_id, current_price):
-    with get_connection() as conn:
-        return conn.execute(f"""
+async def check_alerts(crypto_id, current_price):
+    async with get_connection() as conn:
+        return (await(await conn.execute(f"""
             select * from alerts where crypto_id = {crypto_id} and active = 1
             and ((direction = 'above' and {current_price} >= target_price)
             or (direction = 'below' and {current_price} <= target_price))
-        """).fetchall()
+        """)).fetchall())
 
-def deactivate_alert(alert_id):
-    with get_connection() as conn:
-        conn.execute("update alerts set active = 0 where id = ?", (alert_id,))
+async def deactivate_alert(alert_id):
+    async with get_connection() as conn:
+        await conn.execute("update alerts set active = 0 where id = ?", (alert_id,))
 
-def get_or_create_user(discord_id):
-    with get_connection() as conn:
-        row = conn.execute(f"select id from users where discord_id = {str(discord_id)}").fetchone()
+async def get_or_create_user(discord_id):
+    async with get_connection() as conn:
+        row = (await(await conn.execute(f"select id from users where discord_id = {str(discord_id)}")).fetchone())
         if row:
             return row[0]
-        conn.execute(f"insert into users (discord_id) values {str(discord_id)}")
-        return conn.execute(f"select id from users where discord_id = {str(discord_id)}").fetchone()[0]
+        await conn.execute(f"insert into users (discord_id) values {str(discord_id)}")
+        return (await(await conn.execute(f"select id from users where discord_id = {str(discord_id)}")).fetchone())[0]
 
-def main():
+
+async def main():
     db_path = Path(DB_PATH)
+    global symbol_list
+    symbol_list = [sym + "-USB"  for sym in (await get_crypto_sym())]
+    #async with asyncio.connect(db_path)
+
     if not db_path.exists():
         init_db()
-    insert_crypto_list()
+    await insert_crypto_list()

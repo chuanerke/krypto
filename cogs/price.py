@@ -4,8 +4,15 @@ import db
 import yfinance as yf
 import asyncio
 
-# Yahoo finance requirement (does not show up for WebSocket otherwise)
-symbol_list = [sym + "-USD" for sym in db.get_crypto_sym()]
+
+# async def get_symbol_list():
+#     # can't use async func globally (i think)
+#     symbol_list = [sym + "-USB" async for sym in await db.get_crypto_sym()]
+#     return symbol_list
+
+
+# # Yahoo finance requirement (does not show up for WebSocket otherwise)
+# symbol_list = None
 
 # >>> dat.live()
 # Connected to WebSocket.
@@ -17,39 +24,43 @@ symbol_list = [sym + "-USD" for sym in db.get_crypto_sym()]
 #'vol_all_currencies': '16655864832', 'from_currency': 'BTC', 'circulating_supply': 20027400.0, 'market_cap': 1620675790000.0}
 
 class Price(commands.Cog):
+    """Commands based on getting price information of different cryptocurrencies"""
     def __init__(self, bot):
         self.bot = bot
-
         self.stream_prices.start()
-    
+
     @tasks.loop(count=1)
     async def stream_prices(self):
+        # removed "async with await", might lead to error
+        print("started")
         async with yf.AsyncWebSocket() as ws:
-            await ws.subscribe(symbol_list)
-            await ws.listen(self.on_price_update)
+            try:
+                await ws.subscribe(db.symbol_list)
+                await ws.listen(self.on_price_update)
+            except Exception as error:
+                print(error)
 
-    def on_price_update(self, message):
-        lp_id = db.get_id_from_sym(message["id"][:-4])
-        if db.get_price_from_id(lp_id) != message["price"]:
-            db.update_live_price(lp_id, message["price"], message.get("change", 0), float(message.get("vol_24hr", 0)))
+    async def on_price_update(self, message):
+        lp_id = await db.get_id_from_sym(message["id"][:-4])
+        if await db.get_price_from_id(lp_id) != message["price"]:
+            await db.update_live_price(lp_id, message["price"], message.get("change", 0), float(message.get("vol_24hr", 0)))
 
-    @commands.command(name='price', description="Gives the current price of a cryptocurrency based on its symbol")
+    @commands.command(name='price', help="Gives the current price of a cryptocurrency based on its symbol")
     async def price(self, ctx, symbol: str):
+        info = (await asyncio.to_thread(lambda: yf.Ticker(symbol + "-USD"))).info
+        print(info)
         #assert symbol + "-USD" not in symbol_list
-        if (symbol + "-USD" not in symbol_list):
-            info = await asyncio.to_thread(lambda: yf.Ticker(symbol + "-USD").info)
-            print(info)
-
+        if (symbol + "-USD" not in db.symbol_list):
             if info:
-                db.update_crypto_list(symbol, info["name"])
-                symbol_list.append(symbol + "-USD")
-                lp_id = db.get_id_from_sym(symbol)
-                db.update_live_price(lp_id, info["open"], 0.0, info["volume"])
+                await db.update_crypto_list(symbol, info["name"])
+                db.symbol_list.append(symbol + "-USD")
             else:
                 await ctx.send("Symbol not found")
                 return
-        lp_id = db.get_id_from_sym(symbol)
-        lp = db.get_table_data("live_prices", lp_id)
+        lp_id = await db.get_id_from_sym(symbol)
+        # is insert or ignore, might take too much time, maybe change this part
+        await db.update_live_price(lp_id, info["open"], 0.0, info["volume"])
+        lp = (await db.get_table_data("live_prices", lp_id))
         to_send = f"SYMBOL: {symbol}, PRICE: {lp[1]}, CHANGE: {lp[2]}, VOLUME: {lp[3]}, LAST UPDATED: {lp[4]}"
         await ctx.send(to_send)        
 
@@ -82,8 +93,9 @@ class Price(commands.Cog):
         print(f_his)
         f_his_dict = f_his.to_dict()
         
-        cry_id = db.get_id_from_sym(symbol)
+        cry_id = await db.get_id_from_sym(symbol)
         print(cry_id)
+
 
         prices = [[] for _ in range(5)]
         for key in f_his_dict["Open"].keys():
@@ -102,13 +114,12 @@ class Price(commands.Cog):
             prices[4].append(value)
 
         
-
         for i in range(len(prices[0])):
-            db.update_price_history(cry_id, prices[0][i], prices[1][i], prices[2][i],
+            await db.update_price_history(cry_id, prices[0][i], prices[1][i], prices[2][i],
                                 prices[3][i], prices[1][i], prices[4][i])
     
 
-    @commands.command(name='history', description=
+    @commands.command(name='history', help=
             """
                 Gives the price history for a set amount of days for a cryptocurrency based on its symbol. 
                 For e.g. ?history SHIB 42
@@ -117,10 +128,12 @@ class Price(commands.Cog):
     async def history(self, ctx, symbol, days: int):
         days += 1
         # his = db.get_table_data("price_history", db.get_id_from_sym(symbol))
-        his = db.get_price_history(db.get_id_from_sym(symbol), days)
+        #await db.get_id_from_sym fixed Error: Command raised an exception: OperationalError: near "<": syntax error
+        his = (await db.get_price_history(await db.get_id_from_sym(symbol), days))
         if his == [] or len(his) != days-1:
             await self.add_to_history(symbol, days)
-            his = db.get_price_history(db.get_id_from_sym(symbol), days)
+            #same here
+            his = await db.get_price_history(await db.get_id_from_sym(symbol), days)
         
         to_send = "```"
         print(len(his))
@@ -131,20 +144,20 @@ class Price(commands.Cog):
         await ctx.send(to_send)
     
     @commands.command(name='compare', 
-                description="Compares two cryptocurrencies together for a certain amount of days. For e.g. `?compare BTC ETH 5 ")
+                help="Compares two cryptocurrencies together for a certain amount of days. For e.g. `?compare BTC ETH 5 ")
     async def compare(self, ctx, sym_1, sym_2, days: int):
-        days += 1
-        first_his = db.get_price_history(db.get_id_from_sym(sym_1), days)
+        days += 2
+        first_his = await db.get_price_history(await db.get_id_from_sym(sym_1), days)
         if first_his == []:
             await self.add_to_history(sym_1, days)
-            first_his = db.get_price_history(db.get_id_from_sym(sym_1), days)
+            first_his = await db.get_price_history(await db.get_id_from_sym(sym_1), days)
 
-        second_his = db.get_price_history(db.get_id_from_sym(sym_2), days)
+        second_his = await db.get_price_history(await db.get_id_from_sym(sym_2), days)
         if second_his == []:
             await self.add_to_history(sym_2, days)
-            second_his = db.get_price_history(db.get_id_from_sym(sym_2), days)
+            second_his = await db.get_price_history(await db.get_id_from_sym(sym_2), days)
         
-        join_prod = db.join_compare(db.get_id_from_sym(sym_1), db.get_id_from_sym(sym_2), days)
+        join_prod = (await db.join_compare(await db.get_id_from_sym(sym_1), await db.get_id_from_sym(sym_2), days))
         prod_values = [[], [], []]
         for i in range(len(join_prod)):
             prod_values[0].append(join_prod[i][0])
@@ -168,4 +181,7 @@ class Price(commands.Cog):
 
 
 async def setup(bot):
+    # global symbol_list
+    # symbol_list = await get_symbol_list()
+
     await bot.add_cog(Price(bot))

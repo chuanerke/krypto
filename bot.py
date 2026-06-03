@@ -47,11 +47,11 @@ status_list = cycle([
 async def change_status():
     await bot.change_presence(activity=discord.Game(next(status_list)))
 
-@bot.command(description="Adds two numbers together")
+@bot.command(help="Adds two numbers together")
 async def add(ctx, left: int, right: int):
     await ctx.send(left + right)
 
-@bot.command(description="Rolls NdN")
+@bot.command(help="Rolls NdN")
 async def roll(ctx, dice: str):
     try:
         rolls, limits = map(int, dice.split('d'))
@@ -68,7 +68,7 @@ async def on_command_error(ctx, error):
     await ctx.send(f"Error: {error}")
 
 async def main():
-    db.main()
+    await db.main()
 
     await load_extensions()
     token = str(input("Enter value of token: "))
