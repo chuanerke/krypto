@@ -3,6 +3,7 @@ import discord
 import db
 import yfinance as yf
 import asyncio
+# import Paginator
 
 
 # async def get_symbol_list():
@@ -119,14 +120,7 @@ class Price(commands.Cog):
                                 prices[3][i], prices[1][i], prices[4][i])
     
 
-    @commands.command(name='history', help=
-            """
-                Gives the price history for a set amount of days for a cryptocurrency based on its symbol. 
-                For e.g. ?history SHIB 42
-            """
-        )
-    async def history(self, ctx, symbol, days: int):
-        days += 1
+    async def add_to_embed(self, symbol, days: int, ):
         # his = db.get_table_data("price_history", db.get_id_from_sym(symbol))
         #await db.get_id_from_sym fixed Error: Command raised an exception: OperationalError: near "<": syntax error
         his = (await db.get_price_history(await db.get_id_from_sym(symbol), days))
@@ -136,17 +130,85 @@ class Price(commands.Cog):
             his = await db.get_price_history(await db.get_id_from_sym(symbol), days)
         
         to_send = "```"
+
+        embed = discord.Embed(
+            title = f"{symbol}",
+            description = f"Price history of {symbol} for the past {days} days"
+        )
+
+        his_val = [[], [], [], [], []]
         print(len(his))
         print(days)
         for i in range(len(his)):
-            to_send += f"Date: {his[i][2]} Open Price: {his[i][3]} High Price: {his[i][4]} Low Price: {his[i][5]} Volume: {his[i][7]}\n"
-        to_send += '```'
-        await ctx.send(to_send)
+            # to_send += f"Date: {his[i][2]} Open Price: {his[i][3]} High Price: {his[i][4]} Low Price: {his[i][5]} Volume: {his[i][7]}\n"
+            his_val[0].append(str(his[i][2]))
+            his_val[1].append(str(his[i][3]))
+            his_val[2].append(str(his[i][4]))
+            his_val[3].append(str(his[i][5]))
+            his_val[4].append(str(his[i][7]))
+
+        formatted_prod = [[], [], [], [], []]
+        formatted_prod[0] = '\n'.join([f"{val}" for val in his_val[0]])
+        formatted_prod[1] = '\n'.join([f"{round(float(val), 2)}" for val in his_val[1]])
+        formatted_prod[2] = '\n'.join([f"{round(float(val), 2)}" for val in his_val[2]])
+        formatted_prod[3] = '\n'.join([f"{round(float(val), 2)}" for val in his_val[3]])
+        formatted_prod[4] = '\n'.join([f"{round(float(val), 2)}" for val in his_val[4]])
+
+
+
+        embed.add_field(name="Date", value=f"**{formatted_prod[0]}**", inline="True")
+        embed.add_field(name="Open Price", value=formatted_prod[1], inline="True")
+        embed.add_field(name="Volume", value=formatted_prod[4], inline="True")
+        embed.add_field(name="Date", value=f"**{formatted_prod[0]}**", inline="True")
+
+        embed.add_field(name="High Price", value=formatted_prod[2], inline="True")
+        embed.add_field(name="Low Price", value=formatted_prod[4], inline="True")
+
+        return embed
+
+    @discord.ui.button(label="",style=discord.ButtonStyle.blurple,emoji="⬅️")
+    async def back_button(self, button:discord.ui.Button, interaction:discord.Interaction):
+        button.disabled=True
+        await interaction.response.edit_message(view=self)
+    @discord.ui.button(label="Gray Button",style=discord.ButtonStyle.gray,emoji="\U0001f974") # or .secondary/.grey
+    async def gray_button(self,button:discord.ui.Button,interaction:discord.Interaction):
+        button.disabled=True
+        await interaction.response.edit_message(view=self)
+
+
+    async def set_embed_buttons(self, embed):
+        embed.set_footer()
+
+
+    @commands.command(name='history', help=
+            """
+                Gives the price history for a set amount of days for a cryptocurrency based on its symbol. 
+                For e.g. ?history SHIB 42
+            """
+        )
+    async def history(self, ctx, symbol, days: int):
+        days += 1
+        if days < 10:
+            await ctx.send(embed= await self.add_to_embed(symbol, days))
+            return
+        embeds = []
+        embeds.append(await self.add_to_embed(symbol, days))
+        while True:
+            days = days - 10
+            if (days < 10):
+                embeds.append(await self.add_to_embed(symbol, days))
+                return
+            else:
+                embeds.append(await self.add_to_embed(symbol, 10))
+        
+        # DOES NOT FUCKING WORK
+        # await Paginator.Simple().start(ctx, pages=embeds)
+        
     
     @commands.command(name='compare', 
                 help="Compares two cryptocurrencies together for a certain amount of days. For e.g. `?compare BTC ETH 5 ")
     async def compare(self, ctx, sym_1, sym_2, days: int):
-        days += 2
+        days += 4 # idk why i'll see why later
         first_his = await db.get_price_history(await db.get_id_from_sym(sym_1), days)
         if first_his == []:
             await self.add_to_history(sym_1, days)
