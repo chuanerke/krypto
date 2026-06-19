@@ -38,7 +38,7 @@ async def on_ready():
 
     change_status.start()
 
-status_list = cycle([
+    status_list = cycle([
             'Working!',
             '(Maybe) Working!'
         ])

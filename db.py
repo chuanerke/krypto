@@ -83,7 +83,6 @@ async def init_db():
 async def insert_crypto_list():
     async with get_connection() as conn:
         alr_exists = (await(await conn.execute("select * from crypto")).fetchone())
-        print(alr_exists)
         if alr_exists is None:
             await conn.executemany(
                 "insert or ignore into crypto (symbol, name) values (?, ?)",
@@ -186,18 +185,22 @@ async def get_price_history(crypto_id, p_dates: int):
         return stm
 
 async def join_compare(id_1, id_2, p_dates: int):
-    current_date = datetime.now()
+    current_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-    start_date = current_date - timedelta(days=p_dates)
+    # it could be an issue of it being 12 AM right now. 
+    start_date = current_date - timedelta(days=(p_dates + 1))
     start_date = start_date.isoformat()
+    print(start_date)
 
     current_date = current_date.isoformat()
+    print(current_date)
 
+    # https://sqlblog.org/2009/10/16/bad-habits-to-kick-mis-handling-date-range-queries
     async with get_connection() as conn:
         return (await(await conn.execute(f"""
             select i1.history_date, i1.open_price, i2.open_price 
             from price_history i1 inner join price_history i2 on i1.history_date = i2.history_date where i1.crypto_id = {id_1} and i2.crypto_id = {id_2}
-            and i1.history_date between '{start_date}' and '{current_date}'""")).fetchall())
+            and i1.history_date >= '{start_date}' and i1.history_date <= '{current_date}'""")).fetchall())
 
 
 async def update_crypto_list(crypto_symbol, crypto_name):
@@ -257,9 +260,7 @@ async def get_or_create_user(discord_id):
 async def main():
     db_path = Path(DB_PATH)
     global symbol_list
-    symbol_list = [sym + "-USB"  for sym in (await get_crypto_sym())]
     #async with asyncio.connect(db_path)
-
-    if not db_path.exists():
-        init_db()
+    await init_db()
     await insert_crypto_list()
+    symbol_list = [sym + "-USB"  for sym in (await get_crypto_sym())]

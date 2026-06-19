@@ -3,6 +3,11 @@ import discord
 import db
 import yfinance as yf
 import asyncio
+import matplotlib.pyplot as plt
+from matplotlib.dates import ConciseDateFormatter
+import numpy as np
+    
+
 # import Paginator
 
 
@@ -91,11 +96,11 @@ class Price(commands.Cog):
         ticker = yf.Ticker(symbol.upper() + "-USD")
 
         f_his = await asyncio.to_thread(lambda: ticker.history(period=str(days) + 'd'))
-        print(f_his)
+        # print(f_his)
         f_his_dict = f_his.to_dict()
         
         cry_id = await db.get_id_from_sym(symbol)
-        print(cry_id)
+        # print(cry_id)
 
 
         prices = [[] for _ in range(5)]
@@ -120,7 +125,7 @@ class Price(commands.Cog):
                                 prices[3][i], prices[1][i], prices[4][i])
     
 
-    async def add_to_embed(self, symbol, days: int, ):
+    async def add_to_embed(self, symbol, days: int):
         # his = db.get_table_data("price_history", db.get_id_from_sym(symbol))
         #await db.get_id_from_sym fixed Error: Command raised an exception: OperationalError: near "<": syntax error
         his = (await db.get_price_history(await db.get_id_from_sym(symbol), days))
@@ -166,41 +171,46 @@ class Price(commands.Cog):
 
         return embed
 
-    @discord.ui.button(label="",style=discord.ButtonStyle.blurple,emoji="⬅️")
-    async def back_button(self, button:discord.ui.Button, interaction:discord.Interaction):
-        button.disabled=True
-        await interaction.response.edit_message(view=self)
-    @discord.ui.button(label="Gray Button",style=discord.ButtonStyle.gray,emoji="\U0001f974") # or .secondary/.grey
-    async def gray_button(self,button:discord.ui.Button,interaction:discord.Interaction):
-        button.disabled=True
-        await interaction.response.edit_message(view=self)
+
+    # @discord.ui.button(label="",style=discord.ButtonStyle.blurple,emoji="⬅️")
+    # async def back_button(self, button:discord.ui.Button, interaction:discord.Interaction):
+    #     button.disabled=True
+    #     await interaction.response.edit_message(view=self)
+    # @discord.ui.button(label="Gray Button",style=discord.ButtonStyle.gray,emoji="\U0001f974") # or .secondary/.grey
+    # async def gray_button(self,button:discord.ui.Button,interaction:discord.Interaction):
+    #     button.disabled=True
+    #     await interaction.response.edit_message(view=self)
 
 
-    async def set_embed_buttons(self, embed):
-        embed.set_footer()
+    # async def set_embed_buttons(self, embed):
+    #     embed.set_footer()
 
 
-    @commands.command(name='history', help=
-            """
-                Gives the price history for a set amount of days for a cryptocurrency based on its symbol. 
-                For e.g. ?history SHIB 42
-            """
-        )
-    async def history(self, ctx, symbol, days: int):
-        days += 1
-        if days < 10:
-            await ctx.send(embed= await self.add_to_embed(symbol, days))
-            return
-        embeds = []
-        embeds.append(await self.add_to_embed(symbol, days))
-        while True:
-            days = days - 10
-            if (days < 10):
-                embeds.append(await self.add_to_embed(symbol, days))
-                return
-            else:
-                embeds.append(await self.add_to_embed(symbol, 10))
+
+    # @commands.command(name='history', help=
+    #         """
+    #             Gives the price history for a set amount of days for a cryptocurrency based on its symbol. 
+    #             For e.g. ?history SHIB 42
+    #         """
+    #     )
+    # async def history(self, ctx, symbol, days: int):
+    #     # days += 1
+        # if days < 10:
+        #     await ctx.send(embed= await self.add_to_embed(symbol, days))
+        #     return
+        # embeds = []
+        # embeds.append(await self.add_to_embed(symbol, days))
+        # while True:
+        #     days = days - 10
+        #     if (days < 10):
+        #         embeds.append(await self.add_to_embed(symbol, days))
+        #         return
+        #     else:
+        #         embeds.append(await self.add_to_embed(symbol, 10))
         
+
+
+
         # DOES NOT FUCKING WORK
         # await Paginator.Simple().start(ctx, pages=embeds)
         
@@ -208,18 +218,23 @@ class Price(commands.Cog):
     @commands.command(name='compare', 
                 help="Compares two cryptocurrencies together for a certain amount of days. For e.g. `?compare BTC ETH 5 ")
     async def compare(self, ctx, sym_1, sym_2, days: int):
-        days += 4 # idk why i'll see why later
+        # days += 4 # idk why i'll see why later
         first_his = await db.get_price_history(await db.get_id_from_sym(sym_1), days)
-        if first_his == []:
+        if first_his == [] or (len(first_his) != (days-1)):
             await self.add_to_history(sym_1, days)
             first_his = await db.get_price_history(await db.get_id_from_sym(sym_1), days)
 
         second_his = await db.get_price_history(await db.get_id_from_sym(sym_2), days)
-        if second_his == []:
+        if second_his == [] or (len(second_his) != (days-1)):
             await self.add_to_history(sym_2, days)
             second_his = await db.get_price_history(await db.get_id_from_sym(sym_2), days)
         
+        # print(first_his)
+        # print("\n")
+        # print(second_his)
         join_prod = (await db.join_compare(await db.get_id_from_sym(sym_1), await db.get_id_from_sym(sym_2), days))
+        print(len(join_prod))
+        # print(join_prod)
         prod_values = [[], [], []]
         for i in range(len(join_prod)):
             prod_values[0].append(join_prod[i][0])
@@ -233,11 +248,48 @@ class Price(commands.Cog):
         formatted_prod[0] = '\n'.join([f"{val}" for val in prod_values[0]])
         formatted_prod[1] = '\n'.join([f"{val}" for val in prod_values[1]])
         formatted_prod[2] = '\n'.join([f"{val}" for val in prod_values[2]])
-
+        # print(prod_values)
 
         embed.add_field(name="Date", value=formatted_prod[0], inline="True")
         embed.add_field(name=sym_1, value=formatted_prod[1], inline="True")
         embed.add_field(name=sym_2, value=formatted_prod[2], inline="True")
+
+        print(prod_values)
+
+        # np_date = np.asarray(prod_values[0])
+        np_date = np.array(prod_values[0], dtype='datetime64')
+        np_sym_1 = np.asarray(prod_values[1])
+        np_sym_2 = np.asarray(prod_values[2])
+
+        # fig, ax = plt.subplots(figsize=(5, 2.7))
+        # x = np.arange(len(data1))
+        # ax.plot(x, np.cumsum(data1), color='blue', linewidth=3, linestyle='--')
+        # l, = ax.plot(x, np.cumsum(data2), color='orange', linewidth=2)
+        # l.set_linestyle(':')
+        fig, ax = plt.subplots(figsize=(40, 30))
+        print(len(np_sym_1))
+        x = np_date
+        
+        sym_max = max(max(np_sym_1), max(np_sym_2))
+        sym_min = min(min(np_sym_1), min(np_sym_2))
+        sym_sum = sum([(sum(np_sym_1) / len(np_sym_1)), (sum(np_sym_2) / len(np_sym_2))]) / 2
+        print(sym_sum)
+
+        # np_sym_1_range = np.arange(min(np_sym_1), max(np_sym_1), sum(np_sym_1) / len(np_sym_1))
+        # np_sym_2_range = np.arange(min(np_sym_2), max(np_sym_2), sum(np_sym_2) / len(np_sym_2))
+
+        ax.plot(x, np_sym_1, color='blue', linewidth=3, linestyle='--')
+        l, = ax.plot(x, np_sym_2, color='orange', linewidth=2)
+        l.set_linestyle(':')
+        ax.xaxis.set_major_formatter(ConciseDateFormatter(ax.xaxis.get_major_locator()))
+        # ax.set_yscale('log')
+        ax.set_ylim(sym_min - sym_sum, sym_max + sym_sum) 
+
+
+
+        plt.savefig(fname='/home/sgsk/Documents/file.png')
+
+
         await ctx.send(embed=embed)
 
 
