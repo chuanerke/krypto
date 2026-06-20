@@ -6,16 +6,6 @@ import asyncio
 import matplotlib.pyplot as plt
 from matplotlib.dates import ConciseDateFormatter
 import numpy as np
-    
-
-# import Paginator
-
-
-# async def get_symbol_list():
-#     # can't use async func globally (i think)
-#     symbol_list = [sym + "-USB" async for sym in await db.get_crypto_sym()]
-#     return symbol_list
-
 
 # # Yahoo finance requirement (does not show up for WebSocket otherwise)
 # symbol_list = None
@@ -142,8 +132,8 @@ class Price(commands.Cog):
         )
 
         his_val = [[], [], [], [], []]
-        print(len(his))
-        print(days)
+
+
         for i in range(len(his)):
             # to_send += f"Date: {his[i][2]} Open Price: {his[i][3]} High Price: {his[i][4]} Low Price: {his[i][5]} Volume: {his[i][7]}\n"
             his_val[0].append(str(his[i][2]))
@@ -170,21 +160,6 @@ class Price(commands.Cog):
         embed.add_field(name="Low Price", value=formatted_prod[4], inline="True")
 
         return embed
-
-
-    # @discord.ui.button(label="",style=discord.ButtonStyle.blurple,emoji="⬅️")
-    # async def back_button(self, button:discord.ui.Button, interaction:discord.Interaction):
-    #     button.disabled=True
-    #     await interaction.response.edit_message(view=self)
-    # @discord.ui.button(label="Gray Button",style=discord.ButtonStyle.gray,emoji="\U0001f974") # or .secondary/.grey
-    # async def gray_button(self,button:discord.ui.Button,interaction:discord.Interaction):
-    #     button.disabled=True
-    #     await interaction.response.edit_message(view=self)
-
-
-    # async def set_embed_buttons(self, embed):
-    #     embed.set_footer()
-
 
 
     # @commands.command(name='history', help=
@@ -214,7 +189,24 @@ class Price(commands.Cog):
         # DOES NOT FUCKING WORK
         # await Paginator.Simple().start(ctx, pages=embeds)
         
-    
+    # TODO: do this by pagination? pass prod_values, number of values, field_names list and keep 
+    # const values per page? 
+
+    # async def compare_embed(self, values):
+    #     embed = discord.Embed(
+    #         title = f"Comparison: {sym_1} vs {sym_2} for {days} days"
+    #     )
+    #     formatted_prod = [[], [], []]
+    #     formatted_prod[0] = '\n'.join([f"{val}" for val in prod_values[0]])
+    #     formatted_prod[1] = '\n'.join([f"{val}" for val in prod_values[1]])
+    #     formatted_prod[2] = '\n'.join([f"{val}" for val in prod_values[2]])
+    #     # print(prod_values)
+
+    #     embed.add_field(name="Date", value=formatted_prod[0], inline="True")
+    #     embed.add_field(name=sym_1, value=formatted_prod[1], inline="True")
+    #     embed.add_field(name=sym_2, value=formatted_prod[2], inline="True")
+
+
     @commands.command(name='compare', 
                 help="Compares two cryptocurrencies together for a certain amount of days. For e.g. `?compare BTC ETH 5 ")
     async def compare(self, ctx, sym_1, sym_2, days: int):
@@ -242,7 +234,7 @@ class Price(commands.Cog):
             prod_values[2].append(join_prod[i][2])
 
         embed = discord.Embed(
-            title = f"Comparison: {sym_1} vs {sym_2}"
+            title = f"Comparison: {sym_1} vs {sym_2} for {days} days"
         )
         formatted_prod = [[], [], []]
         formatted_prod[0] = '\n'.join([f"{val}" for val in prod_values[0]])
@@ -266,7 +258,8 @@ class Price(commands.Cog):
         # ax.plot(x, np.cumsum(data1), color='blue', linewidth=3, linestyle='--')
         # l, = ax.plot(x, np.cumsum(data2), color='orange', linewidth=2)
         # l.set_linestyle(':')
-        fig, ax = plt.subplots(figsize=(40, 30))
+        fig = plt.figure(figsize=(8, 6), layout='constrained')
+        spec = fig.add_gridspec(2, 2)
         print(len(np_sym_1))
         x = np_date
         
@@ -278,21 +271,31 @@ class Price(commands.Cog):
         # np_sym_1_range = np.arange(min(np_sym_1), max(np_sym_1), sum(np_sym_1) / len(np_sym_1))
         # np_sym_2_range = np.arange(min(np_sym_2), max(np_sym_2), sum(np_sym_2) / len(np_sym_2))
 
-        ax.plot(x, np_sym_1, color='blue', linewidth=3, linestyle='--')
-        l, = ax.plot(x, np_sym_2, color='orange', linewidth=2)
-        l.set_linestyle(':')
-        ax.xaxis.set_major_formatter(ConciseDateFormatter(ax.xaxis.get_major_locator()))
-        # ax.set_yscale('log')
-        ax.set_ylim(sym_min - sym_sum, sym_max + sym_sum) 
 
+        ax_0 = fig.add_subplot(spec[0, :])
+        ax_1 = fig.add_subplot(spec[1, 0])
+        ax_2 = fig.add_subplot(spec[1, 1])
+
+        ax_2.plot(x, np_sym_1, color='blue', linewidth=3, linestyle='--')
+        l, = ax_1.plot(x, np_sym_2, color='orange', linewidth=2)
+        l.set_linestyle(':')
+        ax_0.plot(x, np_sym_1, color='blue', linewidth=3, linestyle='--')
+        ax_0.plot(x, np_sym_2, color='orange', linewidth=3, linestyle=':')
+
+        ax_0.xaxis.set_major_formatter(ConciseDateFormatter(ax_0.xaxis.get_major_locator()))
+        ax_1.xaxis.set_major_formatter(ConciseDateFormatter(ax_1.xaxis.get_major_locator()))
+        ax_2.xaxis.set_major_formatter(ConciseDateFormatter(ax_2.xaxis.get_major_locator()))
+
+
+        # ax.set_yscale('log')
+        # ax.set_ylim(sym_min - sym_sum, sym_max + sym_sum) 
+        # ax.margins(sym_max)
 
 
         plt.savefig(fname='/home/sgsk/Documents/file.png')
 
 
         await ctx.send(embed=embed)
-
-
 
 async def setup(bot):
     # global symbol_list

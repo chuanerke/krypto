@@ -141,16 +141,11 @@ async def get_table_data(table, lp_id):
 
 async def get_id_from_sym(sym: str):
     async with get_connection() as conn:
-        # ? to '?', check (Changed, Error: Command raised an exception:
-        # ProgrammingError: Incorrect number of bindings supplied. The current statement uses 0, and there are 1 supplied.)
         val = (await conn.execute("select * from crypto where symbol = ?", (sym,)))
         val = (await val.fetchone())[0]
-        #val = val[0]
-
+        
         return val
-        # to_ret = conn.execute("select * from live_prices where crypto_id = ?", (c_id,))
-        # return to_ret
-        #return c_id
+
 
 # create table if not exists price_history (
 #                     id integer primary key autoincrement,
@@ -210,7 +205,6 @@ async def update_crypto_list(crypto_symbol, crypto_name):
 async def get_sym_from_id(crypto_id):
     async with get_connection() as conn:
         return (await(await conn.execute("select symbol from crypto where id = ?", (crypto_id,))).fetchone())[0]
-
 
 
 # create table if not exists alerts (

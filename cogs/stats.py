@@ -15,7 +15,7 @@ class Stats(commands.Cog):
     @commands.command(name="stats", help="Gives the stats of the database so far.")
     async def stats(self, ctx):
         async with db.get_connection() as conn:
-            # because coroutines so need await to finish first (hate)
+            # because coroutines so need await to finish first
             total_records = (await(await conn.execute("select count(*) from price_history")).fetchone())[0]
             total_cryptos = (await(await conn.execute("select count(*) from crypto")).fetchone())[0]
             latest_update = (await(await conn.execute("select max(history_date) from price_history")).fetchone())[0]
